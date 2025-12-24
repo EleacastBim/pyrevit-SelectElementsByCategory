@@ -1,64 +1,66 @@
-# -*- coding: utf-8 -*-
-from pyrevit import revit, DB, script
+from pyrevit import revit, DB, script, forms
+import clr
 
-output = script.get_output()
+class ElementData(object):
+    def __init__(self, element):
+        self.Id = element.Id.IntegerValue
+        self.Name = element.Name
+        self.Element = element
 
-def get_parameter_value(element, param_name):
-    param = element.LookupParameter(param_name)
-    if param:
-        if param.StorageType == DB.StorageType.String:
-            return param.AsString()
-        elif param.StorageType == DB.StorageType.Double:
-            return param.AsDouble()
-        elif param.StorageType == DB.StorageType.Integer:
-            return param.AsInteger()
-        elif param.StorageType == DB.StorageType.ElementId:
-            return param.AsElementId().IntegerValue
-    return None
+class QCWindow(forms.WPFWindow):
+    def __init__(self, xaml_file_name):
+        forms.WPFWindow.__init__(self, xaml_file_name)
+        self._setup_categories()
+
+    def _setup_categories(self):
+        doc = revit.doc
+        # Get categories of all elements in active view to populate dropdown
+        collector = DB.FilteredElementCollector(doc, doc.ActiveView.Id).WhereElementIsNotElementType()
+        
+        categories = set()
+        for el in collector:
+            if el.Category:
+                categories.add(el.Category.Name)
+        
+        self.category_cb.ItemsSource = sorted(list(categories))
+
+    def category_changed(self, sender, args):
+        doc = revit.doc
+        category_name = self.category_cb.SelectedItem
+        if not category_name:
+            return
+
+        # Find BuiltInCategory from Name (simplified for this task)
+        # Better: Filter by category name directly in collector or find the category object
+        all_categories = doc.Settings.Categories
+        target_category = None
+        for cat in all_categories:
+            if cat.Name == category_name:
+                target_category = cat
+                break
+        
+        if target_category:
+            collector = DB.FilteredElementCollector(doc, doc.ActiveView.Id).OfCategoryId(target_category.Id).WhereElementIsNotElementType()
+            elements = [ElementData(el) for el in collector]
+            self.elements_dg.ItemsSource = elements
+
+    def select_click(self, sender, args):
+        selected_items = self.elements_dg.SelectedItems
+        if not selected_items:
+            forms.alert("No elements selected in the list.")
+            return
+
+        element_ids = [DB.ElementId(item.Id) for item in selected_items]
+        
+        from System.Collections.Generic import List
+        id_list = List[DB.ElementId](element_ids)
+        
+        revit.uidoc.Selection.SetElementIds(id_list)
+        revit.uidoc.ShowElements(id_list)
 
 def main():
-    doc = revit.doc
-    collector = DB.FilteredElementCollector(doc, doc.ActiveView.Id).OfCategory(DB.BuiltInCategory.OST_ElectricalEquipment).WhereElementIsNotElementType()
-    
-    equipments = collector.ToElements()
-    
-    if not equipments:
-        output.print_md("## No Electrical Equipments found in the project.")
-        return
-
-    output.print_md("## Electrical Equipments QC Data")
-    
-    for eq in equipments:
-        output.print_md("---")
-        output.print_md("### ID: {}".format(eq.Id))
-        output.print_md("**Name:** {}".format(eq.Name))
-        
-        # Get all parameters
-        params = eq.Parameters
-        if params:
-            data = []
-            for p in params:
-                val = ""
-                if p.StorageType == DB.StorageType.String:
-                    val = p.AsString()
-                elif p.StorageType == DB.StorageType.Double:
-                    # Format double if needed, raw for now
-                    val = str(p.AsDouble())
-                elif p.StorageType == DB.StorageType.Integer:
-                    val = str(p.AsInteger())
-                elif p.StorageType == DB.StorageType.ElementId:
-                    val = str(p.AsElementId().IntegerValue)
-                
-                if val is None:
-                    val = "None"
-                    
-                data.append([p.Definition.Name, val])
-            
-            # Sort by parameter name
-            data.sort(key=lambda x: x[0])
-            
-            # Print as table
-            output.print_table(table_data=data, columns=["Parameter", "Value"])
+    QCWindow("ui.xaml").show()
 
 if __name__ == "__main__":
     main()
+
