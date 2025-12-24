@@ -1,5 +1,8 @@
 from pyrevit import revit, DB, script, forms
 import clr
+clr.AddReference("PresentationFramework")
+clr.AddReference("PresentationCore")
+clr.AddReference("WindowsBase")
 
 class ElementData(object):
     def __init__(self, element):
